@@ -35,8 +35,8 @@
 | **Full Name** | مستوره نايل محمد الثبيتي |
 | **Student ID** | 447540232 |
 | **University Email** | 447540232@std.psau.edu.sa |
-| **GitHub Username** | [your-github-username] |
-| **Repository Link** | [Paste your repository link here] |
+| **GitHub Username** | mstora124 |
+| **Repository Link** | https://github.com/mstora124/OS-Assignment3-Mastourah-Althobaiti.git |
  
 ---
 
