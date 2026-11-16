@@ -6,7 +6,8 @@ import java.util.HashMap;
 import java.util.Random;
 // TODO (Feature 1 and Feature 2): 
 import java.util.concurrent.locks.ReentrantLock;
-// TODO (Feature 3):               import java.util.concurrent.Semaphore;
+// TODO (Feature 3):               
+import java.util.concurrent.Semaphore;
 
 // ANSI Color Codes for enhanced terminal output (same as Assignment 1)
 class Colors {
@@ -129,13 +130,12 @@ class SharedStats {
 // In Assignment 1 only the main thread used the queue. Now several CPUs poll and re-enqueue processes
 // at the same time, so every access to `list` and `map` is a critical section.
 class ReadyQueue {
-    private final LinkedList<Thread> list = new LinkedList<>();   // FIFO queue of threads
-    private final Map<Thread, Process> map = new HashMap<>();     // thread -> process
-
-    // Feature 1: قفل لحماية طابور الجاهزية
+    private final LinkedList<Thread> list = new LinkedList<>();   
+    private final Map<Thread, Process> map = new HashMap<>();     
     private final ReentrantLock lock = new ReentrantLock();
 
-    // TODO Feature 3: declare the counting semaphore that counts the processes waiting in the ready queue here
+    // Feature 3: تعريف السيمافور العددي بقيمة ابتدائية 0 (لأن العمليات تضاف تدريجياً في الـ main)
+    private final Semaphore semaphore = new Semaphore(0);
 
     public void add(Process process) {
         lock.lock();
@@ -144,7 +144,8 @@ class ReadyQueue {
             list.add(thread);
             map.put(thread, process);
 
-            // TODO Feature 3: signal that one more process is available in the queue
+            // Feature 3: إرسال إشارة للسيمافور بأن هناك عملية جديدة أضيفت
+            semaphore.release();
 
             System.out.println(Colors.BLUE + "  ➕ " + Colors.BOLD + Colors.CYAN + process.getName() + Colors.RESET +
                     Colors.BLUE + " (Priority: " + process.getPriority() + ") added to ready queue" + Colors.RESET +
@@ -168,6 +169,11 @@ class ReadyQueue {
         } finally {
             lock.unlock();
         }
+    }
+
+    // دالة للحصول على السيمافور واستخدامه في الـ CPU Worker
+    public Semaphore getSemaphore() {
+        return semaphore;
     }
 
     public Process processOf(Thread thread) {
@@ -299,17 +305,20 @@ class CpuWorker extends Thread {
     public void run() {
         while (SharedStats.getCompletedProcessCount() < SharedStats.totalProcesses) {
 
-            // TODO Feature 3: replace this polling loop by a blocking wait on the counting semaphore
+            // Feature 3: استخدام السيمافور بدل الانتظار المشغول (Busy Waiting)
+            try {
+                readyQueue.getSemaphore().acquire();
+            } catch (InterruptedException e) {
+                return; // إيقاف نظيف عند المقاطعة
+            }
+
+            // فحص إضافي للخروج الآمن إذا اكتملت جميع العمليات
+            if (SharedStats.getCompletedProcessCount() >= SharedStats.totalProcesses) {
+                break;
+            }
+
             Thread thread = readyQueue.poll();
             if (thread == null) {
-                // ⚠️ BUSY WAITING: the CPU keeps checking an empty queue instead of sleeping until
-                // a process is available. It wastes CPU time and needs the "completed == total" test above to stop.
-                SharedStats.busyWaitPolls.incrementAndGet();      // (counted for the verification block)
-                try {
-                    Thread.sleep(20);
-                } catch (InterruptedException e) {
-                    return;
-                }
                 continue;
             }
 
@@ -319,22 +328,25 @@ class CpuWorker extends Thread {
                     readyQueue.snapshot() + Colors.MAGENTA + "]" + Colors.RESET);
 
             process.setCpuId(cpuId);
-            thread.start();                      // run one quantum
+            thread.start();                      
             try {
-                thread.join();                   // wait for the end of the quantum
+                thread.join();                   
             } catch (InterruptedException e) {
                 System.out.println("CPU-" + cpuId + " interrupted.");
             }
 
             if (!process.isFinished()) {
-                readyQueue.add(process);         // not finished: back to the ready queue
+                readyQueue.add(process);         
+            } else {
+                // Feature 3: إذا كانت هذه آخر عملية وتم إنجازها، نقوم بإيقاظ باقي ال CPUs المعلقة
+                if (SharedStats.getCompletedProcessCount() >= SharedStats.totalProcesses) {
+                    readyQueue.getSemaphore().release(SharedStats.totalCPUs);
+                }
             }
-
-            // TODO Feature 3: when the LAST process has completed, wake up the CPUs that are blocked on the
-            // semaphore so that they can terminate (otherwise they would wait forever!)
         }
     }
 }
+
 
 public class SchedulerSimulationSync {
     public static void main(String[] args) {
